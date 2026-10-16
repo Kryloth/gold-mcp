@@ -26,22 +26,10 @@ The Orders tab sends real orders on the account that is logged in to MT5. Closin
 
 ## One-time setup
 
-1. **Python** (3.11+):
+Install these two programs once. `start.bat` creates the Python environment, installs the packages, and builds the page the first time it runs. That first double-click can take a few minutes.
 
-   ```powershell
-   cd backend
-   python -m venv .venv
-   .\.venv\Scripts\pip install -e .
-   ```
-
-2. **Frontend** (Node 20+):
-
-   ```powershell
-   cd frontend
-   npm install
-   ```
-
-   `start.bat` runs `npm install` and `npm run build` the first time if these are missing.
+1. **Python 3.11 or newer**, from [python.org/downloads](https://www.python.org/downloads/). On the first screen, tick **Add python.exe to PATH**.
+2. **Node.js 20 or newer**, from [nodejs.org](https://nodejs.org/). This builds the page.
 
 3. **MT5 history depth** (recommended): *Tools > Options > Charts > Max bars in chart = Unlimited*, then restart MT5. With the default 100,000 bars, M1 history covers only about 70 days. After raising it, stop the API and re-run the backfill once (Ctrl+C when it reports the backfill finished):
 
@@ -67,7 +55,7 @@ The default symbol is `XAUUSD247m`. Set `GOLD_SYMBOL` to your broker's gold symb
 
 ## Running
 
-**Double-click `start.bat`** in this folder. It installs the economic calendar into MetaTrader, starts the API, builds the page if needed, and opens http://127.0.0.1:8000.
+**Double-click `start.bat`** in this folder. The first time, it sets up Python and the page, then installs the economic calendar into MetaTrader, starts the API, and opens http://127.0.0.1:8000.
 
 The calendar is the same MetaTrader list as before: about 2 years of past releases and 14 days ahead, for the US dollar, euro, yuan, pound, and yen, rewritten every 5 minutes. You do not copy the file or click **Add service**. MetaTrader only reads that list when it opens. The first time, if MetaTrader is already open, close it, double-click `start.bat`, then open MetaTrader again. After that the calendar starts with MetaTrader. Keep MetaTrader open and logged in whenever you use the app.
 

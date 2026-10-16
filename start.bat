@@ -5,10 +5,8 @@ set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 
 if not exist "%ROOT%\backend\.venv\Scripts\python.exe" (
-  echo This folder is missing the Python setup in backend\.venv.
-  echo Create that environment and install the project, then try again.
-  pause
-  exit /b 1
+  call :setuppython
+  if errorlevel 1 exit /b 1
 )
 
 echo Checking the MetaTrader calendar...
@@ -86,3 +84,43 @@ echo The app is open in your browser.
 echo Leave the Gold monitor window running. Closing it stops the app.
 echo Your trades stay in MetaTrader either way.
 timeout /t 5 >nul
+exit /b 0
+
+:setuppython
+echo Setting up Python. The first time can take a few minutes.
+set "PY="
+where py >nul 2>&1
+if not errorlevel 1 (
+  py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
+  if not errorlevel 1 set "PY=py -3"
+)
+if not defined PY (
+  where python >nul 2>&1
+  if not errorlevel 1 (
+    python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
+    if not errorlevel 1 set "PY=python"
+  )
+)
+if not defined PY (
+  echo Install Python 3.11 or newer from https://www.python.org/downloads/
+  echo On the first screen, tick "Add python.exe to PATH". Then double-click start.bat again.
+  pause
+  exit /b 1
+)
+pushd "%ROOT%\backend"
+%PY% -m venv .venv
+if errorlevel 1 (
+  echo Could not create the Python environment.
+  popd
+  pause
+  exit /b 1
+)
+call .\.venv\Scripts\python.exe -m pip install -e .
+if errorlevel 1 (
+  echo Installing the Python packages failed.
+  popd
+  pause
+  exit /b 1
+)
+popd
+exit /b 0
