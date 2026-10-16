@@ -347,10 +347,10 @@ function BookStats({ positions, tick, acct }: { positions: AccountTrade[]; tick:
         </div>
       )}
       {targets.length > 0 && (
-        <div className="stat good wide"><small>All targets hit</small><b>{signed(allHit)}</b></div>
+        <div className="stat good half"><small>All targets hit</small><b>{signed(allHit)}</b></div>
       )}
       {positions.length > 0 && (
-        <div className={`stat ${stopped.length ? (allStopped < 0 ? "sell" : "good") : "cost"} wide`}>
+        <div className={`stat ${stopped.length ? (allStopped < 0 ? "sell" : "good") : "cost"} half`}>
           <small>All stops hit</small>
           <b>
             {stopped.length ? signed(allStopped) : "No stops set"}

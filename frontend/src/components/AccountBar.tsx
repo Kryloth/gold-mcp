@@ -49,6 +49,23 @@ function stopText(acct: AccountSummary) {
   return `Your broker warns at ${fmtNum(acct.margin_call, 0)}% margin level (margin call), and ${out}.`;
 }
 
+function marginCallEstimate(acct: AccountSummary) {
+  if (
+    !acct.stop_mode_pct ||
+    acct.margin_call == null ||
+    acct.margin_used == null ||
+    acct.equity == null ||
+    acct.margin_used <= 0
+  ) return null;
+
+  const equityAtCall = acct.margin_used * acct.margin_call / 100;
+  return {
+    equityAtCall,
+    lossRoom: Math.max(0, acct.equity - equityAtCall),
+    reached: acct.equity <= equityAtCall,
+  };
+}
+
 export default function AccountBar({ acct, book, onShowOrders }: { acct: AccountSummary | null; book: AccountBook | null; onShowOrders: () => void }) {
   if (!acct?.connected) return null;
   const cur = acct.currency;
@@ -58,6 +75,7 @@ export default function AccountBar({ acct, book, onShowOrders }: { acct: Account
   const buys = positions.filter((t) => t.side.startsWith("buy"));
   const lots = (list: typeof positions) => list.reduce((s, t) => s + t.volume, 0).toFixed(2);
   const pct = acct.today_pct;
+  const callEstimate = marginCallEstimate(acct);
 
   return (
     <div className="acct">
@@ -101,12 +119,22 @@ export default function AccountBar({ acct, book, onShowOrders }: { acct: Account
           ["Free margin", cash(acct.margin_free, cur)],
           ["Margin level", acct.margin_level != null ? `${fmtNum(acct.margin_level, 0)}%` : "No trades open"],
           ...(acct.stop_mode_pct && acct.margin_call != null ? [["Broker margin call", `${fmtNum(acct.margin_call, 0)}%`] as [string, string]] : []),
+          ...(callEstimate ? [
+            ["Equity at margin call", cash(callEstimate.equityAtCall, cur)] as [string, string],
+            ["Loss room to margin call", <span className={callEstimate.reached ? "tone-down" : "tone-warn"}>
+              {callEstimate.reached ? "Threshold reached" : cash(callEstimate.lossRoom, cur)}
+            </span>] as [string, React.ReactNode],
+          ] : []),
           ...(acct.stop_mode_pct && acct.stop_out != null ? [["Broker stop out", `${fmtNum(acct.stop_out, 0)}%`] as [string, string]] : []),
         ]} />
         <p className="pop-note">
           Free margin is the money still available to open new trades. Margin level is equity divided by the margin your trades use.
           Here it turns amber below 300% and red below 150% as an early warning.
         </p>
+        {callEstimate && <p className="pop-note">
+          The estimate uses: used margin × {fmtNum(acct.margin_call, 0)}%. Loss room is how much more equity can fall before the margin call.
+          It changes when used margin, trading costs, or open positions change.
+        </p>}
         <p className="pop-tip"><b>Tip</b> {stopText(acct)} Keep free margin comfortable so one bad move can't force a close.</p>
       </Pop>
       <Pop
