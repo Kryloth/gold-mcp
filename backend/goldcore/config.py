@@ -3,7 +3,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-SYMBOL = os.environ.get("GOLD_SYMBOL", "XAUUSD247m")
+
+def _settings_file() -> dict[str, str]:
+    path = ROOT / "settings.txt"
+    found: dict[str, str] = {}
+    if not path.is_file():
+        return found
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        found[key.strip().lower()] = value.strip()
+    return found
+
+
+_settings = _settings_file()
+
+SYMBOL = _settings.get("symbol") or os.environ.get("GOLD_SYMBOL") or "XAUUSD247m"
 DB_PATH = Path(os.environ.get("GOLD_DB", ROOT / "data" / "gold.db"))
 
 TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]

@@ -1,91 +1,86 @@
 # gold-mcp
 
-Local XAUUSD monitor and MCP server backed by MetaTrader 5.
+A local gold (XAUUSD) monitor for MetaTrader 5, plus an MCP server that lets an AI read the same prices and news.
 
-- **Chart app**: live candles (M1 to D1) from your MT5 terminal, with economic news marked on the chart. Written for beginners. The sidebar has six tabs:
-  - *Orders*: the open book on the logged-in account, plus a ticket that sends a market order and sets the target from the filled price. Close one trade or all of them. A lock makes the close buttons unclickable.
-  - *History*: closed trades for today, 7 days, or 30 days, with net, win rate, best win, worst loss, and average win and loss. Click a row to show that close on the chart.
-  - *Outlook*: where gold will likely be in 1, 4, or 12 hours, in plain sentences with a range bar.
-  - *Daily summary*: per day, what gold did, which news moved it and by how much, and what headlines were about.
-  - *Coming up*: scheduled news with countdowns and how much each usually moves gold.
-  - *All news*: every report and headline, filterable and synced to the chart.
+Everything runs on your own PC. The app reads live prices, your account, and the economic calendar from the MetaTrader terminal you already have open, and shows them in your browser.
 
-  The top bar shows the account (balance, equity, free margin, today's result), the spread, tick pressure, and retail positioning. London and New York are shaded on the chart. Clicking a marked candle explains the news: what it is, why it matters for gold, what happened this time, and what usually happens. Summaries are generated from the data by rules (no AI key needed).
-- **MCP server**: gives an AI (Cursor, Claude Desktop, and others) price history, news history, upcoming events, per-event gold reaction statistics, and a baseline swing estimate, so it can reason about short-term moves.
+> **Real money.** The Orders tab sends real orders on whichever account is logged in to MetaTrader. Closing the app does not close those trades. Nothing here is financial advice.
 
-```
-MT5 terminal --(MetaTrader5 Python API)--> collector --> data/gold.db <-- MCP server (stdio)
-MT5 service GoldCalendarExport --> Common\Files\gold_calendar.json --> collector
-RSS / GDELT headlines --> collector
-data/gold.db --> FastAPI (:8000) --> browser
-```
+## What it does
 
-Only the collector talks to MT5. The MCP server reads the database, so it keeps working on the last synced data when MT5 or the web app is closed.
+**Chart**: live candles from 1 minute to 1 day, drawn from your broker's prices. News releases are marked on the candles. Click a marked candle to see what the release was, why it matters for gold, what happened this time, and what usually happens. London and New York trading hours are shaded, and a dotted line shows the buy price (ask).
 
-The Orders tab sends real orders on the account that is logged in to MT5. Closing the app does not close those trades.
+**Top bar**: balance, equity, free margin, today's result in dollars and percent, open trades, the spread, short-term buy and sell pressure, and how retail traders are positioned. Click any item for an explanation.
 
-## One-time setup
+**Sidebar tabs**:
 
-Install these two programs once. `start.bat` creates the Python environment, installs the packages, and builds the page the first time it runs. That first double-click can take a few minutes.
+- **Orders**: your open trades, with entry, target, the profit if the target is hit, and the estimated loss if the stop is hit. A ticket places 1 to 20 market orders at once, with the target worked out from the price you actually got. Close one trade or all of them. A lock switch disables the close buttons.
+- **History**: closed trades for today, 7 days, or 30 days, with net result, win rate, best win, worst loss, and average win and loss. Click a row to jump the chart to that close.
+- **Outlook**: where gold is likely to be in 1, 4, or 12 hours, in plain sentences with a range bar.
+- **Daily summary**: what gold did each day and which news moved it.
+- **Coming up**: scheduled news with countdowns and how much each release usually moves gold.
+- **All news**: every release and headline, searchable and synced to the chart.
 
-1. **Python 3.11 or newer**, from [python.org/downloads](https://www.python.org/downloads/). On the first screen, tick **Add python.exe to PATH**.
-2. **Node.js 20 or newer**, from [nodejs.org](https://nodejs.org/). This builds the page.
+All explanations are written by rules from the data. No AI key is needed for the app.
 
-3. **MT5 history depth** (recommended): *Tools > Options > Charts > Max bars in chart = Unlimited*, then restart MT5. With the default 100,000 bars, M1 history covers only about 70 days. After raising it, stop the API and re-run the backfill once (Ctrl+C when it reports the backfill finished):
+**MCP server**: gives an AI client such as Cursor or Claude Desktop the price history, news history, upcoming events, how gold reacted to past releases, and a baseline range estimate.
 
-   ```powershell
-   cd backend
-   .\.venv\Scripts\python -m goldcore.collector --rebackfill
+## Setup
+
+Do these once, before you start the app.
+
+1. **Install MetaTrader 5** and log in to your broker account.
+2. **Turn on Algo Trading** in the MetaTrader toolbar. Without it the app can still show prices, but it cannot place or close orders. The app uses the terminal that is already open and logged in. It never asks for your password.
+3. **Allow more history** (recommended). In MetaTrader, open *Tools > Options > Charts* and set *Max bars in chart* to *Unlimited*, then restart MetaTrader. With the default 100,000 bars, 1-minute history only reaches back about 70 days.
+4. **Install Python 3.11 or newer** from [python.org/downloads](https://www.python.org/downloads/). On the first screen of the installer, tick **Add python.exe to PATH**.
+5. **Install Node.js 20 or newer** from [nodejs.org](https://nodejs.org/). It is used to build the page.
+6. **Check the gold name.** Open `settings.txt` in this folder:
+
+   ```
+   symbol = XAUUSD247m
    ```
 
-4. **Placing orders**: in MT5, turn on *Algo Trading*. The app attaches to the terminal that is already open. It does not ask for the account password.
+   Change `XAUUSD247m` to the gold name in your broker's Market Watch if it is different, for example `XAUUSD` or `XAUUSDm`.
 
-5. **MCP in Cursor**: add this to `%USERPROFILE%\.cursor\mcp.json`, with the path to your clone:
+## Starting and stopping
 
-   ```json
-   "gold-mcp": {
-     "command": "C:\\path\\to\\gold-mcp\\backend\\.venv\\Scripts\\python.exe",
-     "args": ["C:\\path\\to\\gold-mcp\\backend\\mcp_server\\server.py"]
-   }
-   ```
+**Start**: double-click `start.bat`.
 
-   The same command and args work for Claude Desktop's `claude_desktop_config.json`.
+The first start takes a few minutes. It creates the Python environment, installs the packages, builds the page, and installs the news calendar into MetaTrader. Later starts take a few seconds.
 
-The default symbol is `XAUUSD247m`. Set `GOLD_SYMBOL` to your broker's gold symbol before starting the API if it differs.
+When it is ready, the app opens in your browser at http://127.0.0.1:8000. Two windows appear:
 
-## Running
+- The first window closes itself after a few seconds.
+- The **Gold monitor** window stays open while the app runs. Leave it open.
 
-**Double-click `start.bat`** in this folder. The first time, it sets up Python and the page, then installs the economic calendar into MetaTrader, starts the API, and opens http://127.0.0.1:8000.
+If the app is already running, `start.bat` just opens the page again.
 
-The calendar is the same MetaTrader list as before: about 2 years of past releases and 14 days ahead, for the US dollar, euro, yuan, pound, and yen, rewritten every 5 minutes. You do not copy the file or click **Add service**. MetaTrader only reads that list when it opens. The first time, if MetaTrader is already open, close it, double-click `start.bat`, then open MetaTrader again. After that the calendar starts with MetaTrader. Keep MetaTrader open and logged in whenever you use the app.
+**Stop**: press Ctrl+C in the **Gold monitor** window, or double-click `stop.bat`. Your trades stay open in MetaTrader either way.
 
-Two windows appear:
+### The news calendar
 
-- The start window closes itself after a few seconds.
-- The **Gold monitor** window keeps the app running. Press Ctrl+C in that window to stop it.
+News comes from MetaTrader's own economic calendar: about 2 years of past releases and 14 days ahead, for the US dollar, euro, yuan, pound, and yen. A small MetaTrader service called `GoldCalendarExport` copies it out every 5 minutes. `start.bat` installs that service for you.
 
-**Double-click `stop.bat`** to quit without finding that window. Either way, trades stay open in MetaTrader.
+MetaTrader only loads services when it opens. On the first start, if MetaTrader is already open, `start.bat` asks you to close it. Close MetaTrader, double-click `start.bat` again, then open MetaTrader. From then on the calendar starts with MetaTrader.
 
-If the app is already running, `start.bat` only opens the page.
+Prices and trading work without the calendar. Only the news marks and news tabs stay empty.
 
-To run it by hand instead:
+### Changing settings
 
-```powershell
-# Terminal 1: API and collectors (MT5 sync every 60 s, calendar every 5 min, headlines every 15 min)
-cd backend
-.\.venv\Scripts\python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+Edit `settings.txt`, save it, then stop and start the app.
 
-# Terminal 2, only while changing the page: chart app at http://localhost:5173
-cd frontend
-npm run dev
+## Using it with an AI (MCP)
+
+After the first start, add this to `%USERPROFILE%\.cursor\mcp.json` for Cursor, or to `claude_desktop_config.json` for Claude Desktop. Replace `C:\\path\\to\\gold-mcp` with the folder this README is in.
+
+```json
+"gold-mcp": {
+  "command": "C:\\path\\to\\gold-mcp\\backend\\.venv\\Scripts\\python.exe",
+  "args": ["C:\\path\\to\\gold-mcp\\backend\\mcp_server\\server.py"]
+}
 ```
 
-After `npm run build`, the API serves the built app at http://127.0.0.1:8000, so only Terminal 1 is needed. That is what `start.bat` does.
-
-To keep the database fresh for the MCP without the web app, run only the collectors:
-`.\.venv\Scripts\python -m goldcore.collector` from `backend`.
-
-## MCP tools
+The MCP server reads the local database, so it keeps answering with the last saved data even when the app or MetaTrader is closed. Keep the app running to keep that data fresh.
 
 | Tool | Purpose |
 | --- | --- |
@@ -97,32 +92,78 @@ To keep the database fresh for the MCP without the web app, run only the collect
 | `get_event_reaction_stats(event, surprise_sign)` | Gold move distribution 5m/15m/1h/4h after an event, split by beat/miss |
 | `get_news_digest(days, utc_offset_minutes)` | Plain-English daily summaries: price move, key releases and their impact, headline topics |
 | `get_volatility_profile(days)` | Typical H1 range by UTC hour and weekday |
-| `estimate_swing_range(horizon_hours)` | Empirical range/band for the horizon, widened for scheduled events |
+| `estimate_swing_range(horizon_hours)` | Empirical range for the horizon, widened for scheduled events |
 
-Prompt: `short_term_gold_outlook(horizon_hours)` walks the AI through the analysis.
+The prompt `short_term_gold_outlook(horizon_hours)` walks the AI through the analysis.
 
-Test without an AI client: `.\.venv\Scripts\python -m mcp_server.smoke_test` from `backend`.
+To test the MCP server without an AI client, run this from `backend`:
+
+```powershell
+.\.venv\Scripts\python -m mcp_server.smoke_test
+```
+
+## Reloading price history
+
+If you raise *Max bars in chart* after the first start, stop the app and run this once from `backend`. Press Ctrl+C when it says the backfill finished, then start the app again.
+
+```powershell
+.\.venv\Scripts\python -m goldcore.collector --rebackfill
+```
+
+## Running without start.bat
+
+For working on the code, run the two parts in separate PowerShell windows:
+
+```powershell
+# API and data collection on http://127.0.0.1:8000
+cd backend
+.\.venv\Scripts\python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+
+# Page with live reload on http://localhost:5173
+cd frontend
+npm run dev
+```
+
+The API serves the built page itself after `npm run build`, so only the first window is needed for normal use.
+
+To keep the database fresh for the MCP without the web app, run only the collectors from `backend`:
+
+```powershell
+.\.venv\Scripts\python -m goldcore.collector
+```
+
+## How it works
+
+```
+MetaTrader 5 --(Python API)--> collector --> data/gold.db <-- MCP server
+GoldCalendarExport service --> gold_calendar.json --> collector
+RSS / GDELT headlines --> collector
+data/gold.db --> API (:8000) --> browser
+```
+
+Only the collector and the API talk to MetaTrader. Prices sync every 60 seconds, the calendar every 5 minutes, and headlines every 15 minutes.
 
 ## Notes and limits
 
-- All stored times are UTC (the MT5 server offset is detected and removed). The chart displays local time.
-- `XAUUSD247m` trades 24/7 with much lower weekend volatility; the swing estimate compares weekdays with weekdays and weekends with weekends.
-- On this broker the symbol's history starts in December 2025, and M1 history is limited by *Max bars*. Event reactions fall back to M5 bars when M1 is not available.
-- Several releases often share a timestamp (for example Retail Sales and PPI at 12:30 UTC), so their per-event reaction stats include each other's impact. Sample sizes are small (about 10-20 per monthly event); check `n`.
-- Headlines: RSS (FXStreet, Investing.com, Mining.com) builds history from first run onward. GDELT is polled as a best-effort extra source; it rate-limits aggressively and may return nothing. Headline `tone` is a crude keyword score.
-- A target is set from the filled price, not the quote you clicked. Buys fill at the ask and close at the bid; sells do the opposite. Candles are drawn from the bid, so a buy sits above the candle by about the spread.
-- A stop is an estimate. In a fast move the fill can be worse than the stop price.
-- The MCP supplies data and statistics; it does not make guaranteed predictions. Not financial advice.
+- Buys open at the ask and close at the bid. Sells do the opposite. Candles are drawn from the bid, so a buy fills above the candle by about the spread.
+- A target is set from the price the order actually filled at, so it cannot end up on the losing side.
+- The loss shown for a stop is an estimate. In a fast market the fill can be worse than the stop price.
+- Stored times are UTC. The page shows your local time.
+- `XAUUSD247m` trades 24/7 with much quieter weekends, so range estimates compare weekdays with weekdays and weekends with weekends.
+- Several releases often come out at the same minute, so each one's reaction stats include the others. Sample sizes are small, about 10 to 20 per monthly release.
+- Headlines come from FXStreet, Investing.com, and Mining.com RSS from the first run onward. GDELT is an extra source that often rate-limits and may return nothing.
+- Retail positioning comes from FXSSI and can lag by a few minutes.
 
-## Layout
+## Folder layout
 
 ```
 start.bat             start the app and open it in the browser
-stop.bat              stop the app; trades in MT5 stay open
-backend/goldcore/     config, SQLite schema, MT5 feed, calendar ingest, headlines, analytics, collector loops
-backend/api/          FastAPI app (REST + /ws/ticks) that also runs the collectors
-backend/mcp_server/   MCP server (stdio) and smoke test
+stop.bat              stop the app; trades in MetaTrader stay open
+settings.txt          gold symbol name
+backend/goldcore/     settings, database, MetaTrader feed, calendar, headlines, analytics, collectors
+backend/api/          API and live price stream; also runs the collectors
+backend/mcp_server/   MCP server and smoke test
 mql5/                 GoldCalendarExport service source
-frontend/             Vite + React + lightweight-charts app
-data/gold.db          SQLite database (created on first run, not committed)
+frontend/             page (Vite, React, lightweight-charts)
+data/gold.db          local database, created on first start and not committed
 ```

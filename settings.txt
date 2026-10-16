@@ -1,0 +1,3 @@
+# Gold name in MetaTrader's Market Watch.
+# Change this line if your broker uses a different name, then start the app again.
+symbol = XAUUSD247m
