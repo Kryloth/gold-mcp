@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 
-from . import analytics, calendar_ingest, headlines
+from . import analytics, calendar_ingest, calendar_setup, headlines
 from .config import ANALYTICS_SECONDS, CALENDAR_INGEST_SECONDS, HEADLINE_POLL_SECONDS, MT5_SYNC_SECONDS
 from .mt5_feed import MT5Feed
 
@@ -43,6 +43,10 @@ class Collector:
         return added
 
     def start(self) -> None:
+        try:
+            calendar_setup.install_calendar_service()
+        except Exception:
+            log.exception("Calendar service setup failed")
         jobs = [
             ("mt5", self.feed.sync_all, MT5_SYNC_SECONDS, 0),
             ("calendar", self._calendar, CALENDAR_INGEST_SECONDS, 2),

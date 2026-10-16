@@ -11,6 +11,17 @@ if not exist "%ROOT%\backend\.venv\Scripts\python.exe" (
   exit /b 1
 )
 
+echo Checking the MetaTrader calendar...
+pushd "%ROOT%\backend"
+"%ROOT%\backend\.venv\Scripts\python.exe" -m goldcore.calendar_setup
+if errorlevel 2 (
+  popd
+  echo.
+  pause
+  exit /b 1
+)
+popd
+
 netstat -ano | findstr /C:":8000 " | findstr LISTENING >nul
 if not errorlevel 1 (
   echo The app is already running. Opening it.

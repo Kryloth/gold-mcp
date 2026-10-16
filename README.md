@@ -43,18 +43,16 @@ The Orders tab sends real orders on the account that is logged in to MT5. Closin
 
    `start.bat` runs `npm install` and `npm run build` the first time if these are missing.
 
-3. **MT5 calendar service**: copy `mql5/GoldCalendarExport.mq5` to `<MT5 data folder>\MQL5\Services\`, compile it in MetaEditor (F7), then in the Navigator right-click *Services > GoldCalendarExport > Add service*. It rewrites `%APPDATA%\MetaQuotes\Terminal\Common\Files\gold_calendar.json` every 5 minutes (2 years of history plus 14 days ahead for USD, EUR, CNY, GBP, and JPY).
-
-4. **MT5 history depth** (recommended): *Tools > Options > Charts > Max bars in chart = Unlimited*, then restart MT5. With the default 100,000 bars, M1 history covers only about 70 days. After raising it, stop the API and re-run the backfill once (Ctrl+C when it reports the backfill finished):
+3. **MT5 history depth** (recommended): *Tools > Options > Charts > Max bars in chart = Unlimited*, then restart MT5. With the default 100,000 bars, M1 history covers only about 70 days. After raising it, stop the API and re-run the backfill once (Ctrl+C when it reports the backfill finished):
 
    ```powershell
    cd backend
    .\.venv\Scripts\python -m goldcore.collector --rebackfill
    ```
 
-5. **Placing orders**: in MT5, turn on *Algo Trading*. The app attaches to the terminal that is already open. It does not ask for the account password.
+4. **Placing orders**: in MT5, turn on *Algo Trading*. The app attaches to the terminal that is already open. It does not ask for the account password.
 
-6. **MCP in Cursor**: add this to `%USERPROFILE%\.cursor\mcp.json`, with the path to your clone:
+5. **MCP in Cursor**: add this to `%USERPROFILE%\.cursor\mcp.json`, with the path to your clone:
 
    ```json
    "gold-mcp": {
@@ -69,9 +67,11 @@ The default symbol is `XAUUSD247m`. Set `GOLD_SYMBOL` to your broker's gold symb
 
 ## Running
 
-Keep MT5 open and logged in.
+**Double-click `start.bat`** in this folder. It installs the economic calendar into MetaTrader, starts the API, builds the page if needed, and opens http://127.0.0.1:8000.
 
-**Double-click `start.bat`** in this folder. It starts the API, builds the page if needed, and opens http://127.0.0.1:8000. Two windows appear:
+The calendar is the same MetaTrader list as before: about 2 years of past releases and 14 days ahead, for the US dollar, euro, yuan, pound, and yen, rewritten every 5 minutes. You do not copy the file or click **Add service**. MetaTrader only reads that list when it opens. The first time, if MetaTrader is already open, close it, double-click `start.bat`, then open MetaTrader again. After that the calendar starts with MetaTrader. Keep MetaTrader open and logged in whenever you use the app.
+
+Two windows appear:
 
 - The start window closes itself after a few seconds.
 - The **Gold monitor** window keeps the app running. Press Ctrl+C in that window to stop it.
