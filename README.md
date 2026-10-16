@@ -2,27 +2,27 @@
 
 Local XAUUSD monitor and MCP server backed by MetaTrader 5.
 
-- **Chart app**: live `XAUUSD247m` candles (M1 to D1) from your MT5 terminal with economic news marked on the chart,
-  written for beginners. The sidebar has four tabs:
-  - *Outlook*: where gold will likely be in 1, 4 or 12 hours, in plain sentences with a range bar.
+- **Chart app**: live candles (M1 to D1) from your MT5 terminal, with economic news marked on the chart. Written for beginners. The sidebar has six tabs:
+  - *Orders*: the open book on the logged-in account, plus a ticket that sends a market order and sets the target from the filled price. Close one trade or all of them. A lock makes the close buttons unclickable.
+  - *History*: closed trades for today, 7 days, or 30 days, with net, win rate, best win, worst loss, and average win and loss. Click a row to show that close on the chart.
+  - *Outlook*: where gold will likely be in 1, 4, or 12 hours, in plain sentences with a range bar.
   - *Daily summary*: per day, what gold did, which news moved it and by how much, and what headlines were about.
   - *Coming up*: scheduled news with countdowns and how much each usually moves gold.
   - *All news*: every report and headline, filterable and synced to the chart.
 
-  Clicking a marked candle explains the news: what it is, why it matters for gold, what happened this time and
-  what usually happens. Summaries are generated from the data by rules (no AI key needed).
-- **MCP server**: gives an AI (Cursor, Claude Desktop, ...) price history, news history, upcoming events, per-event
-  gold reaction statistics and a baseline swing estimate, so it can reason about short-term moves.
+  The top bar shows the account (balance, equity, free margin, today's result), the spread, tick pressure, and retail positioning. London and New York are shaded on the chart. Clicking a marked candle explains the news: what it is, why it matters for gold, what happened this time, and what usually happens. Summaries are generated from the data by rules (no AI key needed).
+- **MCP server**: gives an AI (Cursor, Claude Desktop, and others) price history, news history, upcoming events, per-event gold reaction statistics, and a baseline swing estimate, so it can reason about short-term moves.
 
 ```
 MT5 terminal --(MetaTrader5 Python API)--> collector --> data/gold.db <-- MCP server (stdio)
 MT5 service GoldCalendarExport --> Common\Files\gold_calendar.json --> collector
 RSS / GDELT headlines --> collector
-data/gold.db --> FastAPI (:8000) --> React chart (:5173)
+data/gold.db --> FastAPI (:8000) --> browser
 ```
 
-Only the collector talks to MT5. The MCP server reads the database, so it keeps working on the last synced data
-when MT5 or the web app is closed.
+Only the collector talks to MT5. The MCP server reads the database, so it keeps working on the last synced data when MT5 or the web app is closed.
+
+The Orders tab sends real orders on the account that is logged in to MT5. Closing the app does not close those trades.
 
 ## One-time setup
 
@@ -41,46 +41,58 @@ when MT5 or the web app is closed.
    npm install
    ```
 
-3. **MT5 calendar service**: copy `mql5/GoldCalendarExport.mq5` to `<MT5 data folder>\MQL5\Services\`, compile it in
-   MetaEditor (F7), then in the Navigator right-click *Services > GoldCalendarExport > Add service*. It rewrites
-   `%APPDATA%\MetaQuotes\Terminal\Common\Files\gold_calendar.json` every 5 minutes (2 years of history plus 14 days
-   ahead for USD, EUR, CNY, GBP and JPY).
+   `start.bat` runs `npm install` and `npm run build` the first time if these are missing.
 
-4. **MT5 history depth** (recommended): *Tools > Options > Charts > Max bars in chart = Unlimited*, then restart MT5.
-   With the default 100,000 bars, M1 history covers only about 70 days. After raising it, stop the API and re-run
-   the backfill once (Ctrl+C when it reports the backfill finished):
+3. **MT5 calendar service**: copy `mql5/GoldCalendarExport.mq5` to `<MT5 data folder>\MQL5\Services\`, compile it in MetaEditor (F7), then in the Navigator right-click *Services > GoldCalendarExport > Add service*. It rewrites `%APPDATA%\MetaQuotes\Terminal\Common\Files\gold_calendar.json` every 5 minutes (2 years of history plus 14 days ahead for USD, EUR, CNY, GBP, and JPY).
+
+4. **MT5 history depth** (recommended): *Tools > Options > Charts > Max bars in chart = Unlimited*, then restart MT5. With the default 100,000 bars, M1 history covers only about 70 days. After raising it, stop the API and re-run the backfill once (Ctrl+C when it reports the backfill finished):
 
    ```powershell
    cd backend
    .\.venv\Scripts\python -m goldcore.collector --rebackfill
    ```
 
-5. **MCP in Cursor**: add this to `%USERPROFILE%\.cursor\mcp.json` (already done on this machine):
+5. **Placing orders**: in MT5, turn on *Algo Trading*. The app attaches to the terminal that is already open. It does not ask for the account password.
+
+6. **MCP in Cursor**: add this to `%USERPROFILE%\.cursor\mcp.json`, with the path to your clone:
 
    ```json
    "gold-mcp": {
-     "command": "C:\\Users\\Kryloth\\Projects\\gold-mcp\\backend\\.venv\\Scripts\\python.exe",
-     "args": ["C:\\Users\\Kryloth\\Projects\\gold-mcp\\backend\\mcp_server\\server.py"]
+     "command": "C:\\path\\to\\gold-mcp\\backend\\.venv\\Scripts\\python.exe",
+     "args": ["C:\\path\\to\\gold-mcp\\backend\\mcp_server\\server.py"]
    }
    ```
 
-   The same command/args work for Claude Desktop's `claude_desktop_config.json`.
+   The same command and args work for Claude Desktop's `claude_desktop_config.json`.
+
+The default symbol is `XAUUSD247m`. Set `GOLD_SYMBOL` to your broker's gold symbol before starting the API if it differs.
 
 ## Running
 
-Keep MT5 open and logged in, then:
+Keep MT5 open and logged in.
+
+**Double-click `start.bat`** in this folder. It starts the API, builds the page if needed, and opens http://127.0.0.1:8000. Two windows appear:
+
+- The start window closes itself after a few seconds.
+- The **Gold monitor** window keeps the app running. Press Ctrl+C in that window to stop it.
+
+**Double-click `stop.bat`** to quit without finding that window. Either way, trades stay open in MetaTrader.
+
+If the app is already running, `start.bat` only opens the page.
+
+To run it by hand instead:
 
 ```powershell
-# Terminal 1: API + all collectors (MT5 sync every 60 s, calendar every 5 min, headlines every 15 min)
+# Terminal 1: API and collectors (MT5 sync every 60 s, calendar every 5 min, headlines every 15 min)
 cd backend
 .\.venv\Scripts\python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 
-# Terminal 2: chart app at http://localhost:5173
+# Terminal 2, only while changing the page: chart app at http://localhost:5173
 cd frontend
 npm run dev
 ```
 
-After `npm run build`, the API also serves the built app at http://127.0.0.1:8000, so only Terminal 1 is needed.
+After `npm run build`, the API serves the built app at http://127.0.0.1:8000, so only Terminal 1 is needed. That is what `start.bat` does.
 
 To keep the database fresh for the MCP without the web app, run only the collectors:
 `.\.venv\Scripts\python -m goldcore.collector` from `backend`.
@@ -106,23 +118,23 @@ Test without an AI client: `.\.venv\Scripts\python -m mcp_server.smoke_test` fro
 ## Notes and limits
 
 - All stored times are UTC (the MT5 server offset is detected and removed). The chart displays local time.
-- `XAUUSD247m` trades 24/7 with much lower weekend volatility; the swing estimate compares weekdays with weekdays
-  and weekends with weekends.
-- On this broker the symbol's history starts in December 2025, and M1 history is limited by *Max bars*. Event
-  reactions fall back to M5 bars when M1 is not available.
-- Several releases often share a timestamp (e.g. Retail Sales and PPI at 12:30 UTC), so their per-event reaction
-  stats include each other's impact. Sample sizes are small (about 10-20 per monthly event); check `n`.
-- Headlines: RSS (FXStreet, Investing.com, Mining.com) builds history from first run onward. GDELT is polled as a
-  best-effort extra source; it rate-limits aggressively and may return nothing. Headline `tone` is a crude keyword score.
+- `XAUUSD247m` trades 24/7 with much lower weekend volatility; the swing estimate compares weekdays with weekdays and weekends with weekends.
+- On this broker the symbol's history starts in December 2025, and M1 history is limited by *Max bars*. Event reactions fall back to M5 bars when M1 is not available.
+- Several releases often share a timestamp (for example Retail Sales and PPI at 12:30 UTC), so their per-event reaction stats include each other's impact. Sample sizes are small (about 10-20 per monthly event); check `n`.
+- Headlines: RSS (FXStreet, Investing.com, Mining.com) builds history from first run onward. GDELT is polled as a best-effort extra source; it rate-limits aggressively and may return nothing. Headline `tone` is a crude keyword score.
+- A target is set from the filled price, not the quote you clicked. Buys fill at the ask and close at the bid; sells do the opposite. Candles are drawn from the bid, so a buy sits above the candle by about the spread.
+- A stop is an estimate. In a fast move the fill can be worse than the stop price.
 - The MCP supplies data and statistics; it does not make guaranteed predictions. Not financial advice.
 
 ## Layout
 
 ```
+start.bat             start the app and open it in the browser
+stop.bat              stop the app; trades in MT5 stay open
 backend/goldcore/     config, SQLite schema, MT5 feed, calendar ingest, headlines, analytics, collector loops
 backend/api/          FastAPI app (REST + /ws/ticks) that also runs the collectors
 backend/mcp_server/   MCP server (stdio) and smoke test
 mql5/                 GoldCalendarExport service source
 frontend/             Vite + React + lightweight-charts app
-data/gold.db          SQLite database (created on first run)
+data/gold.db          SQLite database (created on first run, not committed)
 ```
