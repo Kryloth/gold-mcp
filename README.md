@@ -145,6 +145,8 @@ Only the collector and the API talk to MetaTrader. Prices sync every 60 seconds,
 
 ## Notes and limits
 
+- `start.bat` refuses to start when port 8000 is already used by another program, and `stop.bat` only stops processes on port 8000 that belong to this app.
+
 - Buys open at the ask and close at the bid. Sells do the opposite. Candles are drawn from the bid, so a buy fills above the candle by about the spread.
 - A target is set from the price the order actually filled at, so it cannot end up on the losing side.
 - The loss shown for a stop is an estimate. In a fast market the fill can be worse than the stop price.

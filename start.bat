@@ -20,11 +20,19 @@ if errorlevel 2 (
 )
 popd
 
-netstat -ano | findstr /C:":8000 " | findstr LISTENING >nul
+rem The app counts as running only when port 8000 answers /api/status as gold-mcp.
+rem Anything else listening on the port blocks the start.
+powershell -NoProfile -Command "$listen = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue; try { $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/status -TimeoutSec 2; if ($r.StatusCode -eq 200 -and $r.Content -like '*gold-mcp*') { exit 0 } } catch { }; if ($listen) { exit 2 } else { exit 3 }"
 if not errorlevel 1 (
   echo The app is already running. Opening it.
   start "" http://127.0.0.1:8000/
   exit /b 0
+)
+if errorlevel 2 if not errorlevel 3 (
+  echo Something else is using port 8000, so the app cannot start there.
+  echo Stop that program, then run start.bat again.
+  pause
+  exit /b 1
 )
 
 where npm >nul 2>&1
@@ -72,7 +80,7 @@ if %TRIES% GTR 40 (
   pause
   exit /b 1
 )
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/status -TimeoutSec 2; if ($r.StatusCode -ne 200) { exit 1 } } catch { exit 1 }"
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/status -TimeoutSec 2; if ($r.StatusCode -eq 200 -and $r.Content -like '*gold-mcp*') { exit 0 } exit 1 } catch { exit 1 }"
 if errorlevel 1 (
   timeout /t 1 >nul
   goto wait

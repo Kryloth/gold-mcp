@@ -71,6 +71,7 @@ def status():
         last = _mcp_last_seen(conn)
     heartbeat = last is not None and _now() - last <= 45
     return {
+        "app": "gold-mcp",
         "symbol": SYMBOL,
         "mt5_connected": collector.feed.connected,
         "collectors": collector.status,
