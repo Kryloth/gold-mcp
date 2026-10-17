@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, fmtNum, fmtTime, money, type AccountBook, type AccountSummary, type AccountTrade, type OrderPlan, type Tick } from "../api";
+import { api, fmtNum, fmtTime, money, placedTitle, type AccountBook, type AccountSummary, type AccountTrade, type OrderPlan, type Tick } from "../api";
 import { cash, marginTone } from "./AccountBar";
 
 const OZ_PER_LOT = 100;
@@ -134,7 +134,8 @@ function Row({ t, tick, showSymbol, on, onSelect, canClose, onClosed }: {
       </div>
       <div className="trade-foot">
         <span>
-          {t.time_utc > 0 && <>{fmtTime(t.time_utc, false)} · {ago(t.time_utc)}</>}
+          {t.source_name && <b className={`who who-${t.source ?? "manual"}`} title={placedTitle(t.source, t.magic)}>{t.source_name}</b>}
+          {t.time_utc > 0 && <>{t.source_name ? " · " : ""}{fmtTime(t.time_utc, false)} · {ago(t.time_utc)}</>}
           {" · "}{t.sl > 0 ? `Stop ${fmtNum(t.sl, 3)}` : "No stop"}
           {t.swap !== 0 && <> · Swap {signed(t.swap)}</>}
         </span>
@@ -152,10 +153,59 @@ function Row({ t, tick, showSymbol, on, onSelect, canClose, onClosed }: {
   );
 }
 
+function Band({ kind, title, enabled, onToggle, toggleTitle, value, onValue, armed, price, entry, dollars, count, empty }: {
+  kind: "tp" | "sl";
+  title: string;
+  enabled: boolean;
+  onToggle: () => void;
+  toggleTitle: string;
+  value: string;
+  onValue: (value: string) => void;
+  armed: boolean;
+  price: number | null;
+  entry?: number;
+  dollars: number | null;
+  count: number;
+  empty: string;
+}) {
+  const dist = price != null && entry != null ? price - entry : null;
+  const way = dist == null ? "" : dist > 0 ? "Up" : "Down";
+  const moved = dist == null ? "" : `$${Math.abs(dist).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`;
+  const result = dollars == null ? "" : count > 1 ? `${signed(dollars)} if all ${count} hit` : `${signed(dollars)} if hit`;
+  return (
+    <div className={`band ${kind}${enabled ? "" : " off"}`}>
+      <div className="band-set">
+        <span className="field-head">
+          <small>{title}</small>
+          <button type="button" className={`switch mini${enabled ? " on" : ""}`} aria-pressed={enabled} disabled={!armed} title={toggleTitle} onClick={onToggle}><i /></button>
+        </span>
+        <div className="input"><em>$</em><input value={value} inputMode="decimal" placeholder="1" disabled={!armed || !enabled} onChange={(e) => onValue(e.target.value)} /></div>
+      </div>
+      <div className="band-info">
+        {dist == null ? (
+          <>
+            <b className="dim">{entry == null ? "-" : "Off"}</b>
+            {entry != null && <span>{empty}</span>}
+          </>
+        ) : (
+          <>
+            <b>{fmtNum(price, 3)}</b>
+            <span>{way} {moved}</span>
+            <span>{result}</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OrderTicket({ tick, onPlaced }: { tick: Tick | null; onPlaced: () => void }) {
   const [side, setSide] = useState<"buy" | "sell">("sell");
   const [lots, setLots] = useState("0.01");
   const [profit, setProfit] = useState("1");
+  const [loss, setLoss] = useState("1");
+  const [useProfit, setUseProfit] = useState(true);
+  const [useLoss, setUseLoss] = useState(true);
   const [plan, setPlan] = useState<OrderPlan | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -167,9 +217,21 @@ function OrderTicket({ tick, onPlaced }: { tick: Tick | null; onPlaced: () => vo
 
   const volume = Number(lots);
   const target = Number(profit);
+  const stop = Number(loss);
   const count = pick === "any" ? Math.floor(Number(anyCount)) : pick;
   const countOk = Number.isFinite(count) && count >= 1 && count <= MAX_ORDERS;
-  const ready = Number.isFinite(volume) && volume > 0 && Number.isFinite(target) && target > 0 && countOk;
+  const profitOk = !useProfit || (Number.isFinite(target) && target > 0);
+  const lossOk = !useLoss || (Number.isFinite(stop) && stop > 0);
+  const ready = Number.isFinite(volume) && volume > 0 && profitOk && lossOk && countOk;
+  const profitAmount = useProfit ? target : null;
+  const lossAmount = useLoss ? stop : null;
+
+  const toggleLoss = () => {
+    setUseLoss((on) => {
+      if (!on) setLoss(profit);
+      return !on;
+    });
+  };
 
   useEffect(() => {
     if (!armed || !ready) {
@@ -178,14 +240,14 @@ function OrderTicket({ tick, onPlaced }: { tick: Tick | null; onPlaced: () => vo
     }
     let cancel = false;
     const id = setTimeout(() => {
-      api.planOrder(side, volume, target).then((next) => {
+      api.planOrder(side, volume, profitAmount, lossAmount).then((next) => {
         if (!cancel) { setPlan(next); setFailed(false); setNote(null); }
       }).catch((err: Error) => {
         if (!cancel) { setPlan(null); setFailed(true); setNote(err.message); }
       });
     }, 350);
     return () => { cancel = true; clearTimeout(id); };
-  }, [armed, side, volume, target, ready]);
+  }, [armed, side, volume, profitAmount, lossAmount, ready]);
 
   const place = async () => {
     if (!armed || !ready || busy) return;
@@ -198,7 +260,7 @@ function OrderTicket({ tick, onPlaced }: { tick: Tick | null; onPlaced: () => vo
     for (let k = 0; k < want; k++) {
       setProgress(`${k + 1} of ${want}`);
       try {
-        filled.push(await api.placeOrder(side, volume, target));
+        filled.push(await api.placeOrder(side, volume, profitAmount, lossAmount));
       } catch (err) {
         error = (err as Error).message;
         break;
@@ -209,13 +271,22 @@ function OrderTicket({ tick, onPlaced }: { tick: Tick | null; onPlaced: () => vo
     if (filled.length) onPlaced();
     const last = filled[filled.length - 1];
     const each = last ? `${label(last.side)} ${last.volume.toFixed(2)}` : label(side);
+    const levels = (p: OrderPlan) => [
+      p.tp ? `target ${fmtNum(p.tp, 3)} (${signed(p.profit)})` : "",
+      p.sl ? `stop ${fmtNum(p.sl, 3)} (${signed(p.loss)})` : "",
+    ].filter(Boolean).join(", ");
     if (filled.length === 1 && !error) {
       setFailed(false);
-      setNote(`${each} filled at ${fmtNum(last.price, 3)}. Target ${fmtNum(last.tp, 3)} · ${signed(last.profit)} if hit.`);
+      setNote(`${each} filled at ${fmtNum(last.price, 3)}. ${levels(last) || "No target or stop."}`);
     } else if (!error) {
       setFailed(false);
       const total = filled.reduce((s, p) => s + p.profit, 0);
-      setNote(`${filled.length} × ${each} filled, from ${fmtNum(filled[0].price, 3)} to ${fmtNum(last.price, 3)}. ${signed(total)} if every target is hit.`);
+      const risk = filled.reduce((s, p) => s + p.loss, 0);
+      const outcome = [
+        useProfit ? `${signed(total)} if every target is hit` : "",
+        useLoss ? `${signed(risk)} if every stop is hit` : "",
+      ].filter(Boolean).join(". ");
+      setNote(`${filled.length} × ${each} filled, from ${fmtNum(filled[0].price, 3)} to ${fmtNum(last.price, 3)}. ${outcome}`);
     } else {
       setFailed(true);
       setNote(filled.length ? `${filled.length} of ${want} filled, then stopped: ${error}` : error);
@@ -225,49 +296,75 @@ function OrderTicket({ tick, onPlaced }: { tick: Tick | null; onPlaced: () => vo
   return (
     <form className={`ticket ${side}${armed ? "" : " locked"}`} onSubmit={(e) => { e.preventDefault(); place(); }}>
       <div className="card-head">
-        <span>New order</span>
+        <span className="card-title">New order</span>
+        <div className="seg-side">
+          <button type="button" className={side === "sell" ? "on" : ""} data-side="sell" disabled={!armed} onClick={() => setSide("sell")}>Sell</button>
+          <button type="button" className={side === "buy" ? "on" : ""} data-side="buy" disabled={!armed} onClick={() => setSide("buy")}>Buy</button>
+        </div>
         <Switch on={armed} onToggle={() => setArmed((v) => !v)} what="new orders" />
       </div>
-      <div className="seg-side">
-        <button type="button" className={side === "sell" ? "on" : ""} data-side="sell" disabled={!armed} onClick={() => setSide("sell")}>Sell</button>
-        <button type="button" className={side === "buy" ? "on" : ""} data-side="buy" disabled={!armed} onClick={() => setSide("buy")}>Buy</button>
-      </div>
-      <div className="fields">
+      <div className="setup">
         <label>
           <small>Lots</small>
           <div className="input"><input value={lots} inputMode="decimal" disabled={!armed} onChange={(e) => setLots(e.target.value)} /><em>lot</em></div>
         </label>
-        <label>
-          <small>Profit at target</small>
-          <div className="input"><em>$</em><input value={profit} inputMode="decimal" placeholder="1" disabled={!armed} onChange={(e) => setProfit(e.target.value)} /></div>
-        </label>
-      </div>
-      <div className="count-pick">
-        <small>Orders</small>
-        <div className="count-opts" role="radiogroup" aria-label="How many orders">
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button key={n} type="button" role="radio" aria-checked={pick === n} className={pick === n ? "on" : ""} disabled={!armed} onClick={() => setPick(n)}>{n}</button>
-          ))}
-          <div className={`any${pick === "any" ? " on" : ""}`}>
-            <button type="button" role="radio" aria-checked={pick === "any"} disabled={!armed} onClick={() => setPick("any")}>Any</button>
-            {pick === "any" && (
-              <input
-                value={anyCount}
-                inputMode="numeric"
-                aria-label="Number of orders"
-                disabled={!armed}
-                autoFocus
-                onChange={(e) => setAnyCount(e.target.value.replace(/\D/g, ""))}
-              />
-            )}
+        <div className="count-pick">
+          <small>Orders</small>
+          <div className="count-opts" role="radiogroup" aria-label="How many orders">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button key={n} type="button" role="radio" aria-checked={pick === n} className={pick === n ? "on" : ""} disabled={!armed} onClick={() => setPick(n)}>{n}</button>
+            ))}
+            <div className={`any${pick === "any" ? " on" : ""}`}>
+              <button type="button" role="radio" aria-checked={pick === "any"} disabled={!armed} onClick={() => setPick("any")}>Any</button>
+              {pick === "any" && (
+                <input
+                  value={anyCount}
+                  inputMode="numeric"
+                  aria-label="Number of orders"
+                  disabled={!armed}
+                  autoFocus
+                  onChange={(e) => setAnyCount(e.target.value.replace(/\D/g, ""))}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
       <div className="summary">
-        <div><small>Entry now</small><b>{plan ? fmtNum(plan.price, 3) : "-"}</b></div>
-        <div><small>Target</small><b>{plan ? fmtNum(plan.tp, 3) : "-"}</b></div>
-        <div><small>Distance</small><b>{plan ? `$${fmtNum(Math.abs(plan.tp - plan.price), 3)}` : "-"}</b></div>
-        <div><small>Spread cost</small><b>{tick && ready ? money((tick.ask - tick.bid) * volume * OZ_PER_LOT * count) : "-"}</b></div>
+        <Band
+          kind="tp"
+          title="Take profit"
+          enabled={useProfit}
+          onToggle={() => setUseProfit((v) => !v)}
+          toggleTitle={useProfit ? "Turn the profit target off" : "Turn the profit target on"}
+          value={profit}
+          onValue={setProfit}
+          armed={armed}
+          price={!plan ? null : plan.tp || null}
+          entry={plan?.price}
+          dollars={plan?.tp ? plan.profit * count : null}
+          count={count}
+          empty="No take profit on this order."
+        />
+        <Band
+          kind="sl"
+          title="Stop loss"
+          enabled={useLoss}
+          onToggle={toggleLoss}
+          toggleTitle={useLoss ? "Turn the stop off" : "Turn the stop on. It starts at the profit amount."}
+          value={loss}
+          onValue={setLoss}
+          armed={armed}
+          price={!plan ? null : plan.sl || null}
+          entry={plan?.price}
+          dollars={plan?.sl ? plan.loss * count : null}
+          count={count}
+          empty="No stop loss on this order."
+        />
+        <div className="basis">
+          <span><small>Entry now</small>{" "}{plan ? fmtNum(plan.price, 3) : "-"}</span>
+          <span><small>Spread cost</small>{" "}{tick && ready ? money((tick.ask - tick.bid) * volume * OZ_PER_LOT * count) : "-"}</span>
+        </div>
       </div>
       <button type="submit" className="go" disabled={!armed || !ready || !plan || busy}>
         {!armed
@@ -276,12 +373,10 @@ function OrderTicket({ tick, onPlaced }: { tick: Tick | null; onPlaced: () => vo
             ? `Sending ${progress ?? "…"}`
             : !countOk
               ? `Choose 1 to ${MAX_ORDERS} orders`
-              : count > 1
-                ? `${label(side)} ${count} × ${plan ? plan.volume.toFixed(2) : lots} for ${plan ? signed(plan.profit * count) : "…"}`
-                : `${label(side)} ${plan ? plan.volume.toFixed(2) : lots} for ${plan ? signed(plan.profit) : "…"}`}
+              : `${label(side)} ${count > 1 ? `${count} × ` : ""}${plan ? plan.volume.toFixed(2) : lots}${plan && plan.tp ? ` · ${signed(plan.profit * count)}` : ""}${plan && plan.sl ? ` / ${signed(plan.loss * count)}` : ""}`}
       </button>
       <div className={`note${failed ? " bad" : ""}`}>
-        {note ?? (!armed ? "Turn the switch on to place orders." : plan ? "Fills at the market price. The target is set from the fill. No stop." : "Enter lots and the profit you want at the target.")}
+        {note ?? (!armed ? "Turn the switch on to place orders." : plan ? "Fills at the market price. A target or stop that is on is set from the fill." : "Enter lots, and turn on the profit target, the stop, or both.")}
       </div>
     </form>
   );
@@ -443,7 +538,7 @@ export default function OrdersPanel({ book, tick, acct, selected, onSelect, onPl
       <div className={`book-head${canClose ? "" : " locked"}`}>
         <div>
           <span className="count">{positions.length} open{orders.length > 0 && <> · {orders.length} waiting</>}</span>
-          {positions.length > 0 && <span className={`float ${floating >= 0 ? "tone-up" : "tone-down"}`}>{signed(floating)}</span>}
+          {positions.length > 0 && <span className={`float num num-money ${floating >= 0 ? "tone-up" : "tone-down"}`}>{signed(floating)}</span>}
         </div>
         <CloseAll trades={[...positions, ...orders]} floating={floating} canClose={canClose} onDone={onClosed} />
         <div className="book-actions">

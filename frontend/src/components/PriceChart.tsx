@@ -24,7 +24,7 @@ import {
   TickMarkType,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { IMPORTANCE_COLOR, money, TF_SECONDS, type AccountTrade, type CalendarEvent, type Candle, type ChartSpan, type Tick, type Timeframe } from "../api";
+import { IMPORTANCE_COLOR, money, TF_SECONDS, type AccountTrade, type CalendarEvent, type Candle, type ChartSpan, type ClosedTrade, type Tick, type Timeframe } from "../api";
 
 interface Props {
   tf: Timeframe;
@@ -37,6 +37,7 @@ interface Props {
   yday: { high: number; low: number } | null;
   trades: AccountTrade[];
   orderFocus: AccountTrade | null;
+  closedFocus: ClosedTrade | null;
   onBarClick: (barTime: number) => void;
   onVisibleRangeChange: (from: number, to: number) => void;
   onNeedOlder: () => void;
@@ -1218,6 +1219,7 @@ class OrderZone implements ISeriesPrimitive<Time> {
   private series: ISeriesApi<SeriesType, Time> | null = null;
   private requestUpdate: (() => void) | null = null;
   private trade: AccountTrade | null = null;
+  private closed: { endTime: number; endPrice: number; amount: number } | null = null;
   private times: number[] = [];
   private step = 60;
   private liveTime = 0;
@@ -1232,19 +1234,23 @@ class OrderZone implements ISeriesPrimitive<Time> {
       if (!chart || !series || !trade) return;
       const yEntry = series.priceToCoordinate(trade.price);
       if (yEntry === null) return;
-      const hasTp = trade.tp > 0;
-      const headPrice = hasTp ? trade.tp : (this.livePrice || trade.price);
+      const closed = this.closed;
+      const hasTp = closed != null || trade.tp > 0;
+      const headPrice = closed ? closed.endPrice : hasTp ? trade.tp : (this.livePrice || trade.price);
       const yHead = series.priceToCoordinate(headPrice);
       if (yHead === null) return;
       const times = this.times;
       const barTime = trade.time_utc > 0 ? Math.floor(trade.time_utc / this.step) * this.step : 0;
+      const closeBar = closed ? Math.floor(closed.endTime / this.step) * this.step : 0;
       const plotted = series.data();
       const last = plotted.length ? plotted[plotted.length - 1] : null;
       const xTail = candleX(chart, times, barTime || trade.time_utc, this.step);
-      const xHead = last
-        ? chart.timeScale().timeToCoordinate(last.time as UTCTimestamp)
-          ?? chart.timeScale().logicalToCoordinate((plotted.length - 1) as Logical)
-        : candleX(chart, times, this.liveTime, this.step);
+      const xHead = closed
+        ? candleX(chart, times, closeBar || closed.endTime, this.step)
+        : last
+          ? chart.timeScale().timeToCoordinate(last.time as UTCTimestamp)
+            ?? chart.timeScale().logicalToCoordinate((plotted.length - 1) as Logical)
+          : candleX(chart, times, this.liveTime, this.step);
       const sell = trade.side.startsWith("sell");
       target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
         const rawLeft = xTail === null ? 0 : Math.round(xTail * hr);
@@ -1252,9 +1258,10 @@ class OrderZone implements ISeriesPrimitive<Time> {
         if (hasTp && left < bitmapSize.width) {
           const top = Math.min(yEntry, yHead) * vr;
           const bot = Math.max(yEntry, yHead) * vr;
+          const right = closed && xHead !== null ? Math.max(left, Math.round(xHead * hr)) : bitmapSize.width;
           if (band) {
             ctx.fillStyle = "rgba(125, 211, 252, 0.16)";
-            ctx.fillRect(left, top, bitmapSize.width - left, Math.max(hr, bot - top));
+            ctx.fillRect(left, top, Math.max(hr, right - left), Math.max(hr, bot - top));
             return;
           }
         } else if (band) return;
@@ -1271,7 +1278,7 @@ class OrderZone implements ISeriesPrimitive<Time> {
           hasTp ? "#7dd3fc" : (sell ? "#fb7185" : "#4ade80"),
           hr,
         );
-        const amount = hasTp ? trade.potential : moveProfit(trade, trade.price, headPrice);
+        const amount = closed ? closed.amount : hasTp ? trade.potential : moveProfit(trade, trade.price, headPrice);
         if (amount == null) return;
         const text = signedMoney(amount);
         ctx.font = `600 ${12 * vr}px ${FONT}`;
@@ -1310,8 +1317,9 @@ class OrderZone implements ISeriesPrimitive<Time> {
     this.requestUpdate = null;
   }
 
-  setTrade(trade: AccountTrade | null, times: number[], step: number, live: { time: number; price: number } | null): void {
+  setTrade(trade: AccountTrade | null, times: number[], step: number, live: { time: number; price: number } | null, closed: { endTime: number; endPrice: number; amount: number } | null = null): void {
     this.trade = trade;
+    this.closed = closed;
     this.times = times;
     this.step = step;
     if (live && live.time >= this.liveTime) {
@@ -1341,7 +1349,7 @@ function tradeTitle(side: string, volume: number, profit: number | null) {
   return `${name} ${lots(volume)}${pnl}`;
 }
 
-export default function PriceChart({ tf, candles, events, tick, focus, span, highlight, yday, trades, orderFocus, onBarClick, onVisibleRangeChange, onNeedOlder }: Props) {
+export default function PriceChart({ tf, candles, events, tick, focus, span, highlight, yday, trades, orderFocus, closedFocus, onBarClick, onVisibleRangeChange, onNeedOlder }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -1357,6 +1365,7 @@ export default function PriceChart({ tf, candles, events, tick, focus, span, hig
   const highlightRef = useRef<NewsHighlight | null>(null);
   const highlightTimeRef = useRef<number | null>(null);
   const zoomedNews = useRef("");
+  const zoomedClose = useRef("");
   const fittedSpan = useRef("");
   const columnsRef = useRef<Column[]>([]);
   const futureColumnsRef = useRef<FutureColumn[]>([]);
@@ -1525,6 +1534,21 @@ export default function PriceChart({ tf, candles, events, tick, focus, span, hig
     for (const [price, n] of slCount) {
       wanted.set(`sl:${price}`, { price: Number(price), color: "#fdba74", lineStyle: LineStyle.Dotted, title: n > 1 ? `SL ×${n}` : "SL" });
     }
+    if (closedFocus) {
+      const sell = closedFocus.side.startsWith("sell");
+      wanted.set("hx:open", {
+        price: closedFocus.open_price,
+        color: sell ? "#fb7185" : "#4ade80",
+        lineStyle: LineStyle.Solid,
+        title: tradeTitle(closedFocus.side, closedFocus.volume, null),
+      });
+      wanted.set("hx:close", {
+        price: closedFocus.close_price,
+        color: closedFocus.net >= 0 ? "#4ade80" : "#fb7185",
+        lineStyle: LineStyle.Dashed,
+        title: `Closed ${signedMoney(closedFocus.net)}`,
+      });
+    }
     const lines = orderLinesRef.current;
     for (const key of [...lines.keys()]) {
       if (wanted.has(key)) continue;
@@ -1532,25 +1556,65 @@ export default function PriceChart({ tf, candles, events, tick, focus, span, hig
       lines.delete(key);
     }
     for (const [key, opt] of wanted) {
-      const focused = orderFocus != null && (key === `e:${orderFocus.kind}:${orderFocus.ticket}` || key === `tp:${orderFocus.tp.toFixed(3)}`);
+      const focused = key.startsWith("hx:") || (orderFocus != null && (key === `e:${orderFocus.kind}:${orderFocus.ticket}` || key === `tp:${orderFocus.tp.toFixed(3)}`));
       const options = { ...opt, lineWidth: (focused ? 2 : 1) as 1 | 2, axisLabelVisible: true };
       const existing = lines.get(key);
       if (existing) existing.applyOptions(options);
       else lines.set(key, series.createPriceLine(options));
     }
-  }, [trades, orderFocus]);
+  }, [trades, orderFocus, closedFocus]);
 
   useEffect(() => {
     const saved = candles[candles.length - 1];
     const formed = lastBarRef.current;
     const last = formed && (!saved || formed.time >= saved.time) ? formed : saved;
+    const shown: AccountTrade | null = closedFocus
+      ? {
+          ticket: closedFocus.position,
+          symbol: closedFocus.symbol,
+          side: closedFocus.side,
+          kind: "position",
+          volume: closedFocus.volume,
+          price: closedFocus.open_price,
+          sl: 0,
+          tp: 0,
+          profit: closedFocus.net,
+          potential: closedFocus.net,
+          swap: 0,
+          time_utc: closedFocus.open_utc,
+          comment: "",
+        }
+      : orderFocus;
     orderZoneRef.current?.setTrade(
-      orderFocus,
+      shown,
       candles.map((c) => c.time),
       TF_SECONDS[tf],
       last ? { time: last.time, price: last.close } : null,
+      closedFocus ? { endTime: closedFocus.close_utc, endPrice: closedFocus.close_price, amount: closedFocus.net } : null,
     );
-  }, [orderFocus, candles, tf]);
+  }, [orderFocus, closedFocus, candles, tf]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!closedFocus) {
+      zoomedClose.current = "";
+      return;
+    }
+    if (!chart || !candles.length) return;
+    const id = `${tf}:${closedFocus.position}:${closedFocus.open_utc}`;
+    if (zoomedClose.current === id) return;
+    const step = TF_SECONDS[tf];
+    const openBar = Math.floor(closedFocus.open_utc / step) * step;
+    const closeBar = Math.floor(closedFocus.close_utc / step) * step;
+    if (candles[0].time > openBar || candles[candles.length - 1].time < closeBar) return;
+    zoomedClose.current = id;
+    const span = Math.max(step * 12, closeBar - openBar);
+    const pad = Math.max(step * 6, span * 0.2);
+    chart.timeScale().setVisibleRange({
+      from: (openBar - pad) as UTCTimestamp,
+      to: (closeBar + pad) as UTCTimestamp,
+    });
+  }, [closedFocus, candles, tf]);
 
   useEffect(() => {
     const chart = chartRef.current;

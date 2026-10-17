@@ -22,6 +22,32 @@ MT5_TF = {
 
 # Window size per request during backfill, sized to stay well under typical "Max bars" limits.
 BACKFILL_WINDOW_DAYS = {"M1": 7, "M5": 30, "M15": 60, "M30": 120, "H1": 240, "H4": 730, "D1": 3650}
+# Magic stamped on orders this app sends, so they can be told apart from other Expert Advisors.
+APP_MAGIC = 251016
+
+
+def placed_by(reason: int | None, magic: int | None, comment: str | None) -> tuple[str, str]:
+    """Who sent the order. MetaTrader keeps a reason and a magic number, not the EA file name."""
+    magic_n = int(magic or 0)
+    text = (comment or "").strip()
+    low = text.lower()
+    if magic_n == APP_MAGIC or low in {"gold app", "gold app close"}:
+        return "app", "Gold app"
+    kind = int(reason) if reason is not None else -1
+    if kind == 1:
+        return "phone", "Phone"
+    if kind == 2:
+        return "web", "Web"
+    if kind == 3 or magic_n not in (0,):
+        return "ea", _ea_name(text, magic_n)
+    return "manual", "Manual"
+
+
+def _ea_name(comment: str, magic: int) -> str:
+    low = comment.lower()
+    if not comment or low in {"sl", "tp", "so"} or comment.startswith("["):
+        return f"EA {magic}" if magic else "EA"
+    return comment
 
 
 def _srv_dt(srv_ts: int) -> datetime:
@@ -205,6 +231,7 @@ class MT5Feed:
         def row(raw, kind: str) -> dict:
             d = raw._asdict()
             opened = int(d.get("time") or d.get("time_setup") or 0)
+            source, source_name = placed_by(d.get("reason"), d.get("magic"), d.get("comment"))
             return {
                 "ticket": int(d["ticket"]),
                 "symbol": d["symbol"],
@@ -220,6 +247,9 @@ class MT5Feed:
                 "swap": float(d.get("swap") or 0),
                 "time_utc": opened - off if opened else 0,
                 "comment": d.get("comment") or "",
+                "magic": int(d.get("magic") or 0),
+                "source": source,
+                "source_name": source_name,
             }
 
         with self.lock:
@@ -230,11 +260,12 @@ class MT5Feed:
                 "orders": [row(o, "order") for o in orders],
             }
 
-    def _target_from(self, side: str, volume: float, entry: float, profit: float, info) -> tuple[float, float]:
-        """Price at which this fill would earn `profit`. A buy target is above the fill; a sell target is below it."""
+    def _level_from(self, side: str, volume: float, entry: float, dollars: float, toward: str, info) -> tuple[float, float]:
+        """Price for a profit target or a loss stop. `dollars` is a positive amount."""
         action = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
-        sign = 1 if side == "buy" else -1
-        per = mt5.order_calc_profit(action, self.symbol, volume, entry, entry + sign)
+        win = 1 if side == "buy" else -1
+        sign = win if toward == "profit" else -win
+        per = mt5.order_calc_profit(action, self.symbol, volume, entry, entry + win)
         if per is None or per <= 0:
             raise RuntimeError("MetaTrader 5 could not price that order.")
         tick_size = float(info.trade_tick_size or info.point or 0.01)
@@ -245,29 +276,36 @@ class MT5Feed:
                 raw = round(raw / tick_size) * tick_size
             return round(raw, digits)
 
-        tp = fit(entry + sign * (profit / per))
+        want = dollars if toward == "profit" else -dollars
+        level = fit(entry + sign * (dollars / per))
         got = None
         for _ in range(6):
-            got = mt5.order_calc_profit(action, self.symbol, volume, entry, tp)
-            if got is None or got <= 0:
+            got = mt5.order_calc_profit(action, self.symbol, volume, entry, level)
+            if got is None or got == 0:
                 break
-            if abs(got - profit) < 0.01:
+            if abs(got - want) < 0.01:
                 break
-            tp = fit(entry + (tp - entry) * (profit / got))
-        if side == "buy" and tp <= entry or side == "sell" and tp >= entry:
+            level = fit(entry + (level - entry) * (want / got))
+        winning_side = (side == "buy" and level > entry) or (side == "sell" and level < entry)
+        if toward == "profit" and not winning_side:
             raise RuntimeError("The target would sit on the losing side of the filled price, so it was not set.")
+        if toward == "loss" and winning_side:
+            raise RuntimeError("The stop would sit on the winning side of the filled price, so it was not set.")
         stops = float(info.trade_stops_level or 0) * float(info.point or 0)
-        if stops > 0 and abs(tp - entry) < stops:
-            raise RuntimeError("That profit puts the target closer than the broker allows.")
-        realized = round(float(got), 2) if got is not None and got > 0 else round(profit, 2)
-        return tp, realized
+        if stops > 0 and abs(level - entry) < stops:
+            word = "profit" if toward == "profit" else "loss"
+            raise RuntimeError(f"That {word} puts the price closer than the broker allows.")
+        realized = round(float(got), 2) if got is not None else round(want, 2)
+        return level, realized
 
-    def _market_request(self, side: str, volume: float, profit: float) -> dict:
-        """Build a market order. The target is quoted from the current price and applied again after the fill. Caller holds the lock."""
+    def _market_request(self, side: str, volume: float, profit: float | None, loss: float | None) -> dict:
+        """Build a market order. Target and stop are quoted from the current price and applied again after the fill. Caller holds the lock."""
         if side not in ("buy", "sell"):
             raise RuntimeError("Choose buy or sell.")
-        if profit <= 0:
+        if profit is not None and profit <= 0:
             raise RuntimeError("Enter a profit greater than zero.")
+        if loss is not None and loss <= 0:
+            raise RuntimeError("Enter a loss greater than zero.")
         if not self.connected and not self.connect():
             raise RuntimeError("MetaTrader 5 is not connected.")
         term = mt5.terminal_info()
@@ -284,7 +322,8 @@ class MT5Feed:
         if snapped < float(info.volume_min) or snapped > float(info.volume_max):
             raise RuntimeError(f"Lots must be between {info.volume_min:g} and {info.volume_max:g}.")
         price = float(tick.ask if side == "buy" else tick.bid)
-        tp, realized = self._target_from(side, snapped, price, profit, info)
+        tp, realized = (0.0, 0.0) if profit is None else self._level_from(side, snapped, price, profit, "profit", info)
+        sl, at_stop = (0.0, 0.0) if loss is None else self._level_from(side, snapped, price, loss, "loss", info)
         filling = int(info.filling_mode or 0)
         if filling & 1:
             type_filling = mt5.ORDER_FILLING_FOK
@@ -301,7 +340,7 @@ class MT5Feed:
             "sl": 0.0,
             "tp": 0.0,
             "deviation": 30,
-            "magic": 251016,
+            "magic": APP_MAGIC,
             "comment": "gold app",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": type_filling,
@@ -309,24 +348,28 @@ class MT5Feed:
         return {
             "request": request,
             "info": info,
+            "profit": profit,
+            "loss": loss,
             "plan": {
                 "side": side,
                 "volume": snapped,
                 "profit": realized,
+                "loss": at_stop,
                 "price": price,
                 "tp": tp,
+                "sl": sl,
             },
         }
 
-    def plan_market(self, side: str, volume: float, profit: float) -> dict:
-        """Price a market order and its target. Nothing is sent."""
+    def plan_market(self, side: str, volume: float, profit: float | None, loss: float | None) -> dict:
+        """Price a market order, its target, and its stop. Nothing is sent."""
         with self.lock:
-            return self._market_request(side, volume, profit)["plan"]
+            return self._market_request(side, volume, profit, loss)["plan"]
 
-    def place_market(self, side: str, volume: float, profit: float) -> dict:
-        """Send a market order, then set the target from the filled price so slippage cannot flip it into a loss."""
+    def place_market(self, side: str, volume: float, profit: float | None, loss: float | None) -> dict:
+        """Send a market order, then set the target and stop from the filled price."""
         with self.lock:
-            built = self._market_request(side, volume, profit)
+            built = self._market_request(side, volume, profit, loss)
             request = built["request"]
             check = mt5.order_check(request)
             if check is None or check.retcode not in (0, mt5.TRADE_RETCODE_DONE):
@@ -343,23 +386,31 @@ class MT5Feed:
                     position_id = int(deals[0].position_id)
             opened = mt5.positions_get(ticket=position_id)
             fill = float(opened[0].price_open) if opened else float(result.price or request["price"])
-            tp, realized = self._target_from(built["plan"]["side"], request["volume"], fill, profit, built["info"])
-            moved = mt5.order_send({
-                "action": mt5.TRADE_ACTION_SLTP,
-                "symbol": self.symbol,
-                "position": position_id,
-                "sl": 0.0,
-                "tp": tp,
-            })
-            if moved is None or moved.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED):
-                comment = getattr(moved, "comment", None) if moved is not None else None
-                raise RuntimeError(comment or "The order filled, but the target could not be set.")
+            tp, realized = (0.0, 0.0)
+            sl, at_stop = (0.0, 0.0)
+            if built["profit"] is not None:
+                tp, realized = self._level_from(built["plan"]["side"], request["volume"], fill, built["profit"], "profit", built["info"])
+            if built["loss"] is not None:
+                sl, at_stop = self._level_from(built["plan"]["side"], request["volume"], fill, built["loss"], "loss", built["info"])
+            if tp or sl:
+                moved = mt5.order_send({
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "symbol": self.symbol,
+                    "position": position_id,
+                    "sl": sl,
+                    "tp": tp,
+                })
+                if moved is None or moved.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED):
+                    comment = getattr(moved, "comment", None) if moved is not None else None
+                    raise RuntimeError(comment or "The order filled, but the target or stop could not be set.")
             return {
                 "side": built["plan"]["side"],
                 "volume": request["volume"],
                 "profit": realized,
+                "loss": at_stop,
                 "price": fill,
                 "tp": tp,
+                "sl": sl,
                 "ticket": position_id,
             }
 
@@ -394,7 +445,7 @@ class MT5Feed:
                     "type": mt5.ORDER_TYPE_SELL if selling else mt5.ORDER_TYPE_BUY,
                     "price": float(tick.bid if selling else tick.ask),
                     "deviation": 30,
-                    "magic": 251016,
+                    "magic": APP_MAGIC,
                     "comment": "gold app close",
                     "type_time": mt5.ORDER_TIME_GTC,
                     "type_filling": type_filling,
@@ -560,6 +611,7 @@ class MT5Feed:
             if reason == "closed" and "gold app" in (last.comment or "").lower():
                 reason = "closed here"
             opened = min(ins, key=lambda d: int(d.time))
+            source, source_name = placed_by(getattr(opened, "reason", None), getattr(opened, "magic", None), opened.comment)
             rows.append({
                 "position": pid,
                 "symbol": opened.symbol,
@@ -573,6 +625,9 @@ class MT5Feed:
                 "costs": round(costs, 2),
                 "reason": reason,
                 "closes": len(outs),
+                "magic": int(getattr(opened, "magic", 0) or 0),
+                "source": source,
+                "source_name": source_name,
             })
         rows.sort(key=lambda r: r["close_utc"], reverse=True)
         nets = [r["net"] for r in rows]

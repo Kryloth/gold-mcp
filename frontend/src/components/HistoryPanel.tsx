@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, fmtNum, fmtTime, money, type ClosedTrade, type TradeHistory } from "../api";
+import { api, fmtNum, fmtTime, money, placedTitle, type ClosedTrade, type TradeHistory } from "../api";
 
 const RANGES = [
   { id: "today", label: "Today", days: 0 },
@@ -63,11 +63,10 @@ function groups(trades: ClosedTrade[]) {
   return out;
 }
 
-export default function HistoryPanel({ dayStart, onFocusTime }: { dayStart: number; onFocusTime: (t: number) => void }) {
+export default function HistoryPanel({ dayStart, selected, onPick }: { dayStart: number; selected: number | null; onPick: (trade: ClosedTrade | null) => void }) {
   const [range, setRange] = useState<(typeof RANGES)[number]["id"]>("today");
   const [data, setData] = useState<TradeHistory | null>(null);
   const [failed, setFailed] = useState(false);
-  const [picked, setPicked] = useState<number | null>(null);
   const from = dayStart - (RANGES.find((r) => r.id === range)?.days ?? 0) * 86400;
 
   useEffect(() => {
@@ -129,14 +128,15 @@ export default function HistoryPanel({ dayStart, onFocusTime }: { dayStart: numb
                       return (
                         <li
                           key={t.position}
-                          className={`trade hist ${sell ? "sell" : "buy"}${picked === t.position ? " on" : ""}`}
-                          title="Show this close on the chart"
-                          onClick={() => { setPicked(t.position); onFocusTime(t.close_utc); }}
+                          className={`trade hist ${sell ? "sell" : "buy"}${selected === t.position ? " on" : ""}`}
+                          title="Show this trade on the chart"
+                          onClick={() => onPick(selected === t.position ? null : t)}
                         >
                           <span className="badge">{sell ? "SELL" : "BUY"}</span>
                           <span className="lots">{t.volume.toFixed(2)}</span>
                           <span className="hist-px">{fmtNum(t.open_price, 3)} <i>→</i> {fmtNum(t.close_price, 3)}</span>
                           <span className={`waiting reason-${t.reason.replace(/ /g, "-")}`}>{REASON[t.reason]}</span>
+                          <span className={`hist-who who who-${t.source ?? "manual"}`} title={placedTitle(t.source, t.magic)}>{t.source_name ?? "Manual"}</span>
                           <span className="hist-when">{fmtTime(t.close_utc, false)} · {held(t.open_utc, t.close_utc)}</span>
                           <span className={`pl ${t.net >= 0 ? "tone-up" : "tone-down"}`}>{signed(t.net)}</span>
                           {extra && <span className="hist-extra">{extra}</span>}

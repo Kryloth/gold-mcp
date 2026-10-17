@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api, fmtTime, money, TF_SECONDS,
-  type AccountBook, type CalendarEvent, type Candle, type ChartSpan, type Headline, type McpLink, type Outlook, type Snapshot, type Tick, type Timeframe,
+  type AccountBook, type CalendarEvent, type Candle, type ChartSpan, type ClosedTrade, type Headline, type McpLink, type Outlook, type Snapshot, type Tick, type Timeframe,
 } from "./api";
 import PriceChart from "./components/PriceChart";
 import NewsPanel from "./components/NewsPanel";
@@ -257,6 +257,8 @@ export default function App() {
   const [mcp, setMcp] = useState<McpLink | null>(null);
   const [book, setBook] = useState<AccountBook | null>(null);
   const [orderId, setOrderId] = useState<number | null>(null);
+  const [closedTrade, setClosedTrade] = useState<ClosedTrade | null>(null);
+  const closedFetch = useRef("");
   const { tick, live } = useTicks();
   const loadingOlder = useRef(false);
   const exhausted = useRef(false);
@@ -345,6 +347,28 @@ export default function App() {
   }, [events, selectEvent]);
 
   useEffect(() => {
+    if (!closedTrade) return;
+    const step = TF_SECONDS[tf];
+    const from = closedTrade.open_utc - step * 8;
+    const to = closedTrade.close_utc + step * 8;
+    if (dayCovers(candles, from, to, step)) return;
+    const id = `${tf}:${closedTrade.position}:${closedTrade.open_utc}`;
+    if (closedFetch.current === id) return;
+    closedFetch.current = id;
+    let cancel = false;
+    const need = Math.ceil((to - from) / step) + 10;
+    api.candles(tf, { from, to: to - 1, limit: Math.min(20000, Math.max(need, 50)) }).then((extra) => {
+      if (cancel || !extra.length) return;
+      setCandles((cur) => {
+        const byTime = new Map(cur.map((c) => [c.time, c]));
+        for (const c of extra) byTime.set(c.time, c);
+        return [...byTime.values()].sort((a, b) => a.time - b.time);
+      });
+    }).catch(() => {});
+    return () => { cancel = true; };
+  }, [closedTrade, tf, candles]);
+
+  useEffect(() => {
     let cancel = false;
     const load = () => {
       api.trades().then((b) => { if (!cancel) setBook(b); }).catch(() => {});
@@ -424,10 +448,10 @@ export default function App() {
           <span className={`live ${live ? "on" : ""}`} title={live ? "Live prices from MT5" : "Not connected to MT5"} />
           Gold (XAUUSD)
         </div>
-        <div className="price">{money(price)}</div>
+        <div className="price num num-price">{money(price)}</div>
         {ch24 != null && (
           <div className={ch24 >= 0 ? "tone-up" : "tone-down"} title="Change compared with 24 hours ago">
-            {ch24 >= 0 ? "up" : "down"} {money(Math.abs(ch24))} in 24h
+            {ch24 >= 0 ? "up" : "down"} <span className="num num-chg">{money(Math.abs(ch24))}</span> in 24h
           </div>
         )}
         {todayChange != null && (
@@ -439,7 +463,7 @@ export default function App() {
               key: todayKey, label: "Today", start: dayStart, end: dayStart + 86400, up: todayChange >= 0, today: true,
             })}
           >
-            Today {todayChange >= 0 ? "+" : "-"}{money(Math.abs(todayChange))}
+            Today <span className="num num-chg">{todayChange >= 0 ? "+" : "-"}{money(Math.abs(todayChange))}</span>
           </button>
         )}
         {weekChange != null && (
@@ -451,7 +475,7 @@ export default function App() {
               key: weekKey, label: "This week", start: weekStart, end: weekStart + 7 * 86400, up: weekChange >= 0, today: true,
             })}
           >
-            Week {weekChange >= 0 ? "+" : "-"}{money(Math.abs(weekChange))}
+            Week <span className="num num-chg">{weekChange >= 0 ? "+" : "-"}{money(Math.abs(weekChange))}</span>
           </button>
         )}
         {tick && <SpreadPop tick={tick} />}
@@ -498,6 +522,7 @@ export default function App() {
               yday={yday}
               trades={chartTrades}
               orderFocus={orderFocus}
+              closedFocus={closedTrade}
               onBarClick={onBarClick}
               onVisibleRangeChange={onVisibleRangeChange}
               onNeedOlder={loadOlder}
@@ -522,11 +547,17 @@ export default function App() {
                 tick={tick}
                 acct={acct}
                 selected={orderId}
-                onSelect={(ticket) => setOrderId((cur) => (cur === ticket ? null : ticket))}
+                onSelect={(ticket) => { setClosedTrade(null); setOrderId((cur) => (cur === ticket ? null : ticket)); }}
                 onPlaced={() => { api.trades().then(setBook).catch(() => {}); }}
               />
             )}
-            {tab === "history" && <HistoryPanel dayStart={dayStart} onFocusTime={focusTime} />}
+            {tab === "history" && (
+              <HistoryPanel
+                dayStart={dayStart}
+                selected={closedTrade?.position ?? null}
+                onPick={(trade) => { setOrderId(null); setClosedTrade(trade); }}
+              />
+            )}
             {tab === "outlook" && <OutlookPanel onFocusTime={focusTime} refreshKey={refreshKey} />}
             {tab === "summary" && (
               <DigestPanel activeDay={span?.key ?? null} activeIds={selected} onFocusTime={focusTime} onSelectDay={setSpan} onSelectRelease={selectEventId} refreshKey={refreshKey} />

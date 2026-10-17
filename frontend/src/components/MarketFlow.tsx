@@ -5,9 +5,9 @@ import Pop, { Rows } from "./Pop";
 function Split({ left, right, leftLabel, rightLabel }: { left: number; right: number; leftLabel: string; rightLabel: string }) {
   return (
     <span className="flow-split">
-      <b className="tone-up">{leftLabel} {Math.round(left)}%</b>
+      <b className="tone-up num">{leftLabel} {Math.round(left)}%</b>
       <span className="flow-bar"><i style={{ width: `${left}%` }} /></span>
-      <b className="tone-down">{Math.round(right)}% {rightLabel}</b>
+      <b className="tone-down num">{Math.round(right)}% {rightLabel}</b>
     </span>
   );
 }

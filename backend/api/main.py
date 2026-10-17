@@ -181,7 +181,8 @@ def market_flow():
 class MarketOrder(BaseModel):
     side: str = Field(pattern="^(buy|sell)$")
     volume: float = Field(gt=0)
-    profit: float = Field(gt=0)
+    profit: float | None = Field(default=None, gt=0)
+    loss: float | None = Field(default=None, gt=0)
 
 
 def _order_call(fn):
@@ -194,13 +195,13 @@ def _order_call(fn):
 @app.post("/api/orders/plan")
 def order_plan(body: MarketOrder):
     """Price a market order and the target for the profit asked for. Nothing is sent."""
-    return _order_call(lambda: collector.feed.plan_market(body.side, body.volume, body.profit))
+    return _order_call(lambda: collector.feed.plan_market(body.side, body.volume, body.profit, body.loss))
 
 
 @app.post("/api/orders")
 def place_order(body: MarketOrder):
     """Send a market order on the logged-in account, with the target set for that profit."""
-    return _order_call(lambda: collector.feed.place_market(body.side, body.volume, body.profit))
+    return _order_call(lambda: collector.feed.place_market(body.side, body.volume, body.profit, body.loss))
 
 
 @app.post("/api/orders/{ticket}/close")

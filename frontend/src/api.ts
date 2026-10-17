@@ -163,6 +163,9 @@ export interface AccountTrade {
   swap: number;
   time_utc: number;
   comment: string;
+  magic?: number;
+  source?: "manual" | "phone" | "web" | "app" | "ea";
+  source_name?: string;
 }
 
 export interface AccountBook {
@@ -185,6 +188,9 @@ export interface ClosedTrade {
   costs: number;
   reason: "target" | "stop" | "stop out" | "closed" | "closed here";
   closes: number;
+  magic?: number;
+  source?: "manual" | "phone" | "web" | "app" | "ea";
+  source_name?: string;
 }
 
 export interface TradeHistory {
@@ -284,8 +290,10 @@ export interface OrderPlan {
   side: "buy" | "sell";
   volume: number;
   profit: number;
+  loss: number;
   price: number;
   tp: number;
+  sl: number;
   ticket?: number;
 }
 
@@ -312,15 +320,23 @@ export const api = {
   history: (from: number) => get<TradeHistory>(`/api/history?from=${from}`),
   marketFlow: () => get<MarketFlow>("/api/market-flow"),
   account: (dayStart: number) => get<AccountSummary>(`/api/account?from=${dayStart}`),
-  planOrder: (side: "buy" | "sell", volume: number, profit: number) =>
-    post<OrderPlan>("/api/orders/plan", { side, volume, profit }),
-  placeOrder: (side: "buy" | "sell", volume: number, profit: number) =>
-    post<OrderPlan>("/api/orders", { side, volume, profit }),
+  planOrder: (side: "buy" | "sell", volume: number, profit: number | null, loss: number | null) =>
+    post<OrderPlan>("/api/orders/plan", { side, volume, profit, loss }),
+  placeOrder: (side: "buy" | "sell", volume: number, profit: number | null, loss: number | null) =>
+    post<OrderPlan>("/api/orders", { side, volume, profit, loss }),
   closeOrder: (ticket: number) =>
     post<{ ticket: number; kind: "position" | "order"; price: number }>(`/api/orders/${ticket}/close`, {}),
 };
 
 export const TZ_MINUTES = -new Date().getTimezoneOffset();
+
+export function placedTitle(source?: string, magic?: number) {
+  if (source === "ea") return magic ? `Expert Advisor, magic ${magic}` : "Expert Advisor";
+  if (source === "app") return "Placed from this app";
+  if (source === "phone") return "Placed from the MetaTrader phone app";
+  if (source === "web") return "Placed from the MetaTrader web terminal";
+  return "Placed by hand in MetaTrader";
+}
 
 export const money = (v: number | null | undefined) =>
   v === null || v === undefined ? "-" : `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

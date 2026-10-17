@@ -27,7 +27,7 @@ export default function SpreadPop({ tick }: { tick: Tick }) {
   return (
     <Pop
       className={`spread-pop ${state}`}
-      chip={<><small>Spread</small><b>{fmtNum(spread, 3)}</b>{state !== "normal" && <em>{state}</em>}</>}
+      chip={<><small>Spread</small><b className="num num-spread">{fmtNum(spread, 3)}</b>{state !== "normal" && <em>{state}</em>}</>}
     >
       <h5>Spread</h5>
       <p className="pop-read">

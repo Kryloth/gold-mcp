@@ -10,11 +10,20 @@ export default function Pop({ chip, children, className = "" }: { chip: ReactNod
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const place = () => {
+      const card = ref.current?.querySelector(".pop-card");
+      if (!(card instanceof HTMLElement)) return;
+      card.classList.remove("flip");
+      if (card.getBoundingClientRect().right > window.innerWidth - 8) card.classList.add("flip");
+    };
     document.addEventListener("mousedown", away);
     document.addEventListener("keydown", esc);
+    window.addEventListener("resize", place);
+    place();
     return () => {
       document.removeEventListener("mousedown", away);
       document.removeEventListener("keydown", esc);
+      window.removeEventListener("resize", place);
     };
   }, [open]);
 

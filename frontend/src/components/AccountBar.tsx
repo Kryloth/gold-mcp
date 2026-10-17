@@ -80,7 +80,7 @@ export default function AccountBar({ acct, book, onShowOrders }: { acct: Account
   return (
     <div className="acct">
       <Pop
-        chip={<><small>Balance</small><b>{cash(acct.balance, cur)}</b></>}
+        chip={<><small>Balance</small><b className="num num-money">{cash(acct.balance, cur)}</b></>}
       >
         <h5>Account</h5>
         <Rows rows={[
@@ -94,7 +94,7 @@ export default function AccountBar({ acct, book, onShowOrders }: { acct: Account
         <p className="pop-tip"><b>Tip</b> Watch equity more than balance while trades are open. {stopText(acct)}</p>
       </Pop>
       <Pop
-        chip={<><small>Equity</small><b className={tone((acct.equity ?? 0) - (acct.balance ?? 0))}>{cash(acct.equity, cur)}</b></>}
+        chip={<><small>Equity</small><b className={`num num-money ${tone((acct.equity ?? 0) - (acct.balance ?? 0))}`}>{cash(acct.equity, cur)}</b></>}
       >
         <h5>Equity</h5>
         <Rows rows={[
@@ -108,8 +108,8 @@ export default function AccountBar({ acct, book, onShowOrders }: { acct: Account
       <Pop
         chip={<>
           <small>Free margin</small>
-          <b className={marginTone(acct.margin_level)}>{cash(acct.margin_free, cur)}</b>
-          {acct.margin_level != null && <em className={marginTone(acct.margin_level)}>{fmtNum(acct.margin_level, 0)}%</em>}
+          <b className={`num num-money ${marginTone(acct.margin_level)}`}>{cash(acct.margin_free, cur)}</b>
+          {acct.margin_level != null && <em className={`num num-pct ${marginTone(acct.margin_level)}`}>{fmtNum(acct.margin_level, 0)}%</em>}
         </>}
       >
         <h5>Free margin</h5>
@@ -140,8 +140,8 @@ export default function AccountBar({ acct, book, onShowOrders }: { acct: Account
       <Pop
         chip={<>
           <small>Today P/L</small>
-          <b className={tone(acct.today)}>{signedCash(acct.today, cur)}</b>
-          {pct != null && <em className={tone(pct)}>{pct >= 0 ? "+" : ""}{fmtNum(pct, 2)}%</em>}
+          <b className={`num num-money ${tone(acct.today)}`}>{signedCash(acct.today, cur)}</b>
+          {pct != null && <em className={`num num-pct ${tone(pct)}`}>{pct >= 0 ? "+" : ""}{fmtNum(pct, 2)}%</em>}
         </>}
       >
         <h5>Today since midnight</h5>
@@ -161,8 +161,8 @@ export default function AccountBar({ acct, book, onShowOrders }: { acct: Account
       <Pop
         chip={<>
           <small>Open</small>
-          <b>{positions.length}</b>
-          {positions.length > 0 && <em className={tone(acct.floating)}>{signedCash(acct.floating, cur)}</em>}
+          <b className="num num-count">{positions.length}</b>
+          {positions.length > 0 && <em className={`num num-money ${tone(acct.floating)}`}>{signedCash(acct.floating, cur)}</em>}
         </>}
       >
         <h5>Open trades</h5>
